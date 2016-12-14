@@ -51,6 +51,7 @@ public:
 
 	std::string GetHex() const;
 	void SetHex(const char* psz);
+	void SetHexUnsigned(const unsigned char* psz);
 	void SetHex(const std::string& str);
 	std::string ToString() const;
 
