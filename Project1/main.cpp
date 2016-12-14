@@ -1850,6 +1850,26 @@ static void *fill_segment_thr(void *thread_data)
 }
 
 
+void xor_block(block *dst, const block *src) {
+	int i;
+	for (i = 0; i < ARGON2_QWORDS_IN_BLOCK; ++i) {
+		dst->v[i] ^= src->v[i];
+	}
+}
+
+
+void copy_block(block *dst, const block *src) {
+	memcpy(dst->v, src->v, sizeof(uint64_t) * ARGON2_QWORDS_IN_BLOCK);
+}
+
+
+static void store_block(void *output, const block *src) {
+	unsigned i;
+	for (i = 0; i < ARGON2_QWORDS_IN_BLOCK; ++i) {
+		store64((uint8_t *)output + i * sizeof(src->v[i]), src->v[i]);
+	}
+}
+
 int fill_memory_blocks(argon2_instance_t *instance) {
 	uint32_t r, s;
 	argon2_thread_handle_t *thread = NULL;
@@ -1924,31 +1944,43 @@ int fill_memory_blocks(argon2_instance_t *instance) {
 
 
 		if (instance != NULL) {
-			uint32_t i, j;
+			uint32_t i;
 			std::vector<uint256> leaves;
-
 			for (i = 0; i < instance->memory_blocks; ++i) {
-				uint32_t how_many_words =
-					(instance->memory_blocks > ARGON2_QWORDS_IN_BLOCK)
-					? 1
-					: ARGON2_QWORDS_IN_BLOCK;
-
-				for (j = 0; j < how_many_words; ++j) {
-					printf("Block %.4u [%3u]: %016" PRIx64 "\n", i, j, instance->memory[i].v[j]);
-
-					char temp[16];
-					sprintf(temp, "%z", instance->memory[i].v[j]);
-
-					uint256 rv;
-					rv.SetHex(temp);
-					leaves.push_back(rv);
-				}
-
-
+				block blockhash;
+				copy_block(&blockhash, &instance->memory[i]);
+				uint8_t blockhash_bytes[ARGON2_BLOCK_SIZE];
+				store_block(blockhash_bytes, &blockhash);
+				uint8_t output[16];
+				blake2b(output, 16, blockhash_bytes, ARGON2_BLOCK_SIZE, NULL, 0);
+				uint256 rv;
+				rv.SetHexUnsigned(output);
+				leaves.push_back(rv);
 			}
 
 			uint256 resultMerkelRoot = ComputeMerkleRoot(leaves);
 			std::cout << resultMerkelRoot.GetHex() << std::endl;
+
+			// Step 3 : Select nonce N
+			uint64_t nNonce = 0;
+			uint8_t blockhash_output[16];
+			uint8_t blockhash_input[40];
+			uint8_t Y[70][16];
+
+			// Step 4 : Y0 = H(resultMerkelRoot, N)
+			blake2b(Y[0], 16, &resultMerkelRoot, 32, &nNonce, 8);
+			
+			// Step 5 : For 1 <= j <= L
+						// I(j) = Y(j - 1) mod T;
+						// Y(j) = H(Y(j - 1), X[I(j)])
+			uint8_t L = 70;
+			for (uint8_t j = 1; j < L; j++) {
+				uint32_t ij = Y[j - 1] % 2048;
+				block blockhash;
+				copy_block(&blockhash, instance->memory);
+				blake2b(Y[j], 16, Y[j - 1], 16, &instance->memory[ij], 8);
+			}
+
 		}
 
 	}
@@ -1963,25 +1995,6 @@ fail:
 	return rc;
 }
 
-void xor_block(block *dst, const block *src) {
-	int i;
-	for (i = 0; i < ARGON2_QWORDS_IN_BLOCK; ++i) {
-		dst->v[i] ^= src->v[i];
-	}
-}
-
-
-void copy_block(block *dst, const block *src) {
-	memcpy(dst->v, src->v, sizeof(uint64_t) * ARGON2_QWORDS_IN_BLOCK);
-}
-
-
-static void store_block(void *output, const block *src) {
-	unsigned i;
-	for (i = 0; i < ARGON2_QWORDS_IN_BLOCK; ++i) {
-		store64((uint8_t *)output + i * sizeof(src->v[i]), src->v[i]);
-	}
-}
 
 void free_memory(const argon2_context *context, uint8_t *memory,
 	size_t num, size_t size) {
