@@ -5,7 +5,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <inttypes.h>
-#include <emmintrin.h>  
+#include <emmintrin.h> 
+#include <random>
 #include "common.h"
 #include "uint256.h"
 #include "merkle.h"
@@ -1868,6 +1869,17 @@ static void store_block(void *output, const block *src) {
 	for (i = 0; i < ARGON2_QWORDS_IN_BLOCK; ++i) {
 		store64((uint8_t *)output + i * sizeof(src->v[i]), src->v[i]);
 	}
+}
+
+static const unsigned Mod37BitPosition[] = // map a bit value mod 37 to its position		
+{
+	1, 0, 1, 26, 2, 23, 27, 0, 3, 16, 24, 30, 28, 11, 0, 13, 4,
+		7, 17, 0, 25, 22, 31, 15, 29, 10, 12, 6, 0, 21, 14, 9, 5,
+	20, 8, 19, 18
+};
+
+unsigned trailing_zeros(unsigned n) {
+	return Mod37BitPosition[(-n & n) % 37];	
 }
 
 int fill_memory_blocks(argon2_instance_t *instance) {
