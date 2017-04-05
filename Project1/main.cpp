@@ -4,12 +4,241 @@
 #include <vector>
 #include <stdint.h>
 #include <stdlib.h>
+#include <math.h>
 #include <inttypes.h>
 #include <emmintrin.h> 
 #include <random>
 #include "common.h"
 #include "uint256.h"
 #include "merkle.h"
+#include "mt_config.h"
+#include "merkletree.h"
+#include "mt_arr_list.h"
+//#include "sha.h"
+#include "mt_crypto.h"
+
+
+#define COMPILER_ASSERT(X) (void) sizeof(char[(X) ? 1 : -1])
+
+#define ROTL32(X, B) rotl32((X), (B))
+static inline uint32_t
+rotl32(const uint32_t x, const int b)
+{
+	return (x << b) | (x >> (32 - b));
+}
+
+#define ROTL64(X, B) rotl64((X), (B))
+static inline uint64_t
+rotl64(const uint64_t x, const int b)
+{
+	return (x << b) | (x >> (64 - b));
+}
+
+#define ROTR32(X, B) rotr32((X), (B))
+static inline uint32_t
+rotr32(const uint32_t x, const int b)
+{
+	return (x >> b) | (x << (32 - b));
+}
+
+#define ROTR64(X, B) rotr64((X), (B))
+static inline uint64_t
+rotr64(const uint64_t x, const int b)
+{
+	return (x >> b) | (x << (64 - b));
+}
+
+#define LOAD64_LE(SRC) load64_le(SRC)
+static inline uint64_t
+load64_le(const uint8_t src[8])
+{
+#ifdef NATIVE_LITTLE_ENDIAN
+	uint64_t w;
+	memcpy(&w, src, sizeof w);
+	return w;
+#else
+	uint64_t w = (uint64_t)src[0];
+	w |= (uint64_t)src[1] << 8;
+	w |= (uint64_t)src[2] << 16;
+	w |= (uint64_t)src[3] << 24;
+	w |= (uint64_t)src[4] << 32;
+	w |= (uint64_t)src[5] << 40;
+	w |= (uint64_t)src[6] << 48;
+	w |= (uint64_t)src[7] << 56;
+	return w;
+#endif
+}
+
+#define STORE64_LE(DST, W) store64_le((DST), (W))
+static inline void
+store64_le(uint8_t dst[8], uint64_t w)
+{
+#ifdef NATIVE_LITTLE_ENDIAN
+	memcpy(dst, &w, sizeof w);
+#else
+	dst[0] = (uint8_t)w; w >>= 8;
+	dst[1] = (uint8_t)w; w >>= 8;
+	dst[2] = (uint8_t)w; w >>= 8;
+	dst[3] = (uint8_t)w; w >>= 8;
+	dst[4] = (uint8_t)w; w >>= 8;
+	dst[5] = (uint8_t)w; w >>= 8;
+	dst[6] = (uint8_t)w; w >>= 8;
+	dst[7] = (uint8_t)w;
+#endif
+}
+
+#define LOAD32_LE(SRC) load32_le(SRC)
+static inline uint32_t
+load32_le(const uint8_t src[4])
+{
+#ifdef NATIVE_LITTLE_ENDIAN
+	uint32_t w;
+	memcpy(&w, src, sizeof w);
+	return w;
+#else
+	uint32_t w = (uint32_t)src[0];
+	w |= (uint32_t)src[1] << 8;
+	w |= (uint32_t)src[2] << 16;
+	w |= (uint32_t)src[3] << 24;
+	return w;
+#endif
+}
+
+#define STORE32_LE(DST, W) store32_le((DST), (W))
+static inline void
+store32_le(uint8_t dst[4], uint32_t w)
+{
+#ifdef NATIVE_LITTLE_ENDIAN
+	memcpy(dst, &w, sizeof w);
+#else
+	dst[0] = (uint8_t)w; w >>= 8;
+	dst[1] = (uint8_t)w; w >>= 8;
+	dst[2] = (uint8_t)w; w >>= 8;
+	dst[3] = (uint8_t)w;
+#endif
+}
+
+/* ----- */
+
+#define LOAD64_BE(SRC) load64_be(SRC)
+static inline uint64_t
+load64_be(const uint8_t src[8])
+{
+#ifdef NATIVE_BIG_ENDIAN
+	uint64_t w;
+	memcpy(&w, src, sizeof w);
+	return w;
+#else
+	uint64_t w = (uint64_t)src[7];
+	w |= (uint64_t)src[6] << 8;
+	w |= (uint64_t)src[5] << 16;
+	w |= (uint64_t)src[4] << 24;
+	w |= (uint64_t)src[3] << 32;
+	w |= (uint64_t)src[2] << 40;
+	w |= (uint64_t)src[1] << 48;
+	w |= (uint64_t)src[0] << 56;
+	return w;
+#endif
+}
+
+#define STORE64_BE(DST, W) store64_be((DST), (W))
+static inline void
+store64_be(uint8_t dst[8], uint64_t w)
+{
+#ifdef NATIVE_BIG_ENDIAN
+	memcpy(dst, &w, sizeof w);
+#else
+	dst[7] = (uint8_t)w; w >>= 8;
+	dst[6] = (uint8_t)w; w >>= 8;
+	dst[5] = (uint8_t)w; w >>= 8;
+	dst[4] = (uint8_t)w; w >>= 8;
+	dst[3] = (uint8_t)w; w >>= 8;
+	dst[2] = (uint8_t)w; w >>= 8;
+	dst[1] = (uint8_t)w; w >>= 8;
+	dst[0] = (uint8_t)w;
+#endif
+}
+
+#define LOAD32_BE(SRC) load32_be(SRC)
+static inline uint32_t
+load32_be(const uint8_t src[4])
+{
+#ifdef NATIVE_BIG_ENDIAN
+	uint32_t w;
+	memcpy(&w, src, sizeof w);
+	return w;
+#else
+	uint32_t w = (uint32_t)src[3];
+	w |= (uint32_t)src[2] << 8;
+	w |= (uint32_t)src[1] << 16;
+	w |= (uint32_t)src[0] << 24;
+	return w;
+#endif
+}
+
+#define STORE32_BE(DST, W) store32_be((DST), (W))
+static inline void
+store32_be(uint8_t dst[4], uint32_t w)
+{
+#ifdef NATIVE_BIG_ENDIAN
+	memcpy(dst, &w, sizeof w);
+#else
+	dst[3] = (uint8_t)w; w >>= 8;
+	dst[2] = (uint8_t)w; w >>= 8;
+	dst[1] = (uint8_t)w; w >>= 8;
+	dst[0] = (uint8_t)w;
+#endif
+}
+
+#ifndef __GNUC__
+# ifdef __attribute__
+#  undef __attribute__
+# endif
+# define __attribute__(a)
+#endif
+
+#ifndef CRYPTO_ALIGN
+# if defined(__INTEL_COMPILER) || defined(_MSC_VER)
+#  define CRYPTO_ALIGN(x) __declspec(align(x))
+# else
+#  define CRYPTO_ALIGN(x) __attribute__ ((aligned(x)))
+# endif
+#endif
+
+#if defined(_MSC_VER) && \
+    (defined(_M_X64) || defined(_M_AMD64) || defined(_M_IX86))
+
+# include <intrin.h>
+
+# define HAVE_INTRIN_H    1
+# define HAVE_MMINTRIN_H  1
+# define HAVE_EMMINTRIN_H 1
+# define HAVE_PMMINTRIN_H 1
+# define HAVE_TMMINTRIN_H 1
+# define HAVE_SMMINTRIN_H 1
+# define HAVE_AVXINTRIN_H 1
+# if _MSC_VER >= 1600
+#  define HAVE_WMMINTRIN_H 1
+# endif
+# if _MSC_VER >= 1700 && defined(_M_X64)
+#  define HAVE_AVX2INTRIN_H 1
+# endif
+#elif defined(HAVE_INTRIN_H)
+# include <intrin.h>
+#endif
+
+/*designed by the Lyra PHC team */
+static inline uint64_t
+fBlaMka(uint64_t x, uint64_t y)
+{
+	const uint64_t m = UINT64_C(0xFFFFFFFF);
+	const uint64_t xy = (x & m) * (y & m);
+	return x + y + 2 * xy;
+}
+
+
+
+//#include <stdio.h>
 #define _CRT_SECURE_NO_WARNINGS
 
 /*For memory wiping*/
@@ -34,6 +263,81 @@
 #ifndef NOT_OPTIMIZED
 #define NOT_OPTIMIZED
 #endif
+#ifndef _SHA_enum_
+#define _SHA_enum_
+/*
+*  All SHA functions return one of these values.
+*/
+enum {
+	shaSuccess = 0,
+	shaNull,            /* Null pointer parameter */
+	shaInputTooLong,    /* input data too long */
+	shaStateError,      /* called Input after FinalBits or Result */
+	shaBadParam         /* passed a bad parameter */
+};
+#endif /* _SHA_enum_ */
+
+/*
+*  These constants hold size information for each of the SHA
+*  hashing operations
+*/
+enum {
+	SHA1_Message_Block_Size = 64, SHA224_Message_Block_Size = 64,
+	SHA256_Message_Block_Size = 64, SHA384_Message_Block_Size = 128,
+	SHA512_Message_Block_Size = 128,
+	USHA_Max_Message_Block_Size = SHA512_Message_Block_Size,
+
+	SHA1HashSize = 20, SHA224HashSize = 28, SHA256HashSize = 32,
+	SHA384HashSize = 48, SHA512HashSize = 64,
+	USHAMaxHashSize = SHA512HashSize,
+
+	SHA1HashSizeBits = 160, SHA224HashSizeBits = 224,
+	SHA256HashSizeBits = 256, SHA384HashSizeBits = 384,
+	SHA512HashSizeBits = 512, USHAMaxHashSizeBits = SHA512HashSizeBits
+};
+
+/*
+*  These constants are used in the USHA (unified sha) functions.
+*/
+typedef enum SHAversion {
+	SHA1, SHA224, SHA256, SHA384, SHA512
+} SHAversion;
+
+/*
+*  This structure will hold context information for the SHA-1
+*  hashing operation.
+*/
+typedef struct SHA1Context {
+	uint32_t Intermediate_Hash[SHA1HashSize / 4]; /* Message Digest */
+
+	uint32_t Length_Low;                /* Message length in bits */
+	uint32_t Length_High;               /* Message length in bits */
+
+	int_least16_t Message_Block_Index;  /* Message_Block array index */
+										/* 512-bit message blocks */
+	uint8_t Message_Block[SHA1_Message_Block_Size];
+
+	int Computed;                       /* Is the digest computed? */
+	int Corrupted;                      /* Is the digest corrupted? */
+} SHA1Context;
+
+/*
+*  This structure will hold context information for the SHA-256
+*  hashing operation.
+*/
+typedef struct SHA256Context {
+	uint32_t Intermediate_Hash[SHA256HashSize / 4]; /* Message Digest */
+
+	uint32_t Length_Low;                /* Message length in bits */
+	uint32_t Length_High;               /* Message length in bits */
+
+	int_least16_t Message_Block_Index;  /* Message_Block array index */
+										/* 512-bit message blocks */
+	uint8_t Message_Block[SHA256_Message_Block_Size];
+
+	int Computed;                       /* Is the digest computed? */
+	int Corrupted;                      /* Is the digest corrupted? */
+} SHA256Context;
 
 /* Memory allocator types --- for external allocation */
 typedef int(*allocate_fptr)(uint8_t **memory, size_t bytes_to_allocate);
@@ -140,6 +444,32 @@ static inline __m128i fBlaMka(__m128i x, __m128i y) {
 	G2(row1l,row2l,row3l,row4l,row1h,row2h,row3h,row4h); \
 	\
 	UNDIAGONALIZE(row1l,row2l,row3l,row4l,row1h,row2h,row3h,row4h);
+
+
+#define G3(a, b, c, d)          \
+    do {                       \
+        a = fBlaMka(a, b);     \
+        d = ROTR64(d ^ a, 32); \
+        c = fBlaMka(c, d);     \
+        b = ROTR64(b ^ c, 24); \
+        a = fBlaMka(a, b);     \
+        d = ROTR64(d ^ a, 16); \
+        c = fBlaMka(c, d);     \
+        b = ROTR64(b ^ c, 63); \
+    } while ((void) 0, 0)
+
+#define BLAKE2_ROUND_NOMSG(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, \
+                           v12, v13, v14, v15)                               \
+    do {                                                                     \
+        G3(v0, v4, v8, v12);                                                  \
+        G3(v1, v5, v9, v13);                                                  \
+        G3(v2, v6, v10, v14);                                                 \
+        G3(v3, v7, v11, v15);                                                 \
+        G3(v0, v5, v10, v15);                                                 \
+        G3(v1, v6, v11, v12);                                                 \
+        G3(v2, v7, v8, v13);                                                  \
+        G3(v3, v4, v9, v14);                                                  \
+    } while ((void) 0, 0)
 
 /*
 Here we implement an abstraction layer for the simpĺe requirements
@@ -367,6 +697,33 @@ typedef enum Argon2_version {
 	ARGON2_VERSION_NUMBER = ARGON2_VERSION_13
 } argon2_version;
 
+#ifdef __cplusplus
+#define EXTERN_C       extern "C"
+#define EXTERN_C_BEGIN extern "C" {
+#define EXTERN_C_END   }
+#else
+#define EXTERN_C       /* Nothing */
+#define EXTERN_C_BEGIN /* Nothing */
+#define EXTERN_C_END   /* Nothing */
+#endif
+
+EXTERN_C int SHA256Reset(SHA256Context *);
+EXTERN_C int SHA256Input(SHA256Context *, const uint8_t *bytes,
+	unsigned int bytecount);
+EXTERN_C int SHA256FinalBits(SHA256Context *, const uint8_t bits,
+	unsigned int bitcount);
+EXTERN_C int SHA256Result(SHA256Context *,
+	uint8_t Message_Digest[SHA256HashSize]);
+
+EXTERN_C_BEGIN
+int SHA256Reset(SHA256Context *);
+int SHA256Input(SHA256Context *, const uint8_t *bytes,
+	unsigned int bytecount);
+int SHA256FinalBits(SHA256Context *, const uint8_t bits,
+	unsigned int bitcount);
+int SHA256Result(SHA256Context *,
+	uint8_t Message_Digest[SHA256HashSize]);
+EXTERN_C_END
 /*
 * Function that gives the string representation of an argon2_type.
 * @param type The argon2_type that we want the string for
@@ -567,8 +924,6 @@ ARGON2_PUBLIC size_t argon2_encodedlen(uint32_t t_cost, uint32_t m_cost,
 	uint32_t parallelism, uint32_t saltlen,
 	uint32_t hashlen, argon2_type type);
 
-
-
 int validate_inputs(const argon2_context *context) {
 	if (NULL == context) {
 		return ARGON2_INCORRECT_PARAMETER;
@@ -721,7 +1076,12 @@ enum argon2_core_constants {
 * Memory blocks can be copied, XORed. Internal words can be accessed by [] (no
 * bounds checking).
 */
-typedef struct block_ { uint64_t v[ARGON2_QWORDS_IN_BLOCK]; } block;
+typedef struct block_ { uint64_t v[ARGON2_QWORDS_IN_BLOCK]; uint64_t prev_block; uint64_t ref_block; } block;
+
+typedef struct block_with_offset_ { 
+	block memory;         
+	uint64_t offset;
+} block_with_offset;
 
 
 /*
@@ -826,6 +1186,18 @@ void initial_kat(const uint8_t *blockhash, const argon2_context *context,
 
 		printf("\n");
 	}
+}
+
+void xor_block(block *dst, const block *src) {
+	int i;
+	for (i = 0; i < ARGON2_QWORDS_IN_BLOCK; ++i) {
+		dst->v[i] ^= src->v[i];
+	}
+}
+
+
+void copy_block(block *dst, const block *src) {
+	memcpy(dst->v, src->v, sizeof(uint64_t) * ARGON2_QWORDS_IN_BLOCK);
 }
 
 void print_tag(const void *out, uint32_t outlen) {
@@ -1022,7 +1394,7 @@ int blake2b_init_param(blake2b_state *S, const blake2b_param *P) {
 /* Sequential blake2b initialization */
 int blake2b_init(blake2b_state *S, size_t outlen) {
 	blake2b_param P;
-
+	blake2b_param *pP = &P;
 	if (S == NULL) {
 		return -1;
 	}
@@ -1033,19 +1405,19 @@ int blake2b_init(blake2b_state *S, size_t outlen) {
 	}
 
 	/* Setup Parameter Block for unkeyed BLAKE2 */
-	P.digest_length = (uint8_t)outlen;
-	P.key_length = 0;
-	P.fanout = 1;
-	P.depth = 1;
-	P.leaf_length = 0;
-	P.node_offset = 0;
-	P.node_depth = 0;
-	P.inner_length = 0;
-	memset(P.reserved, 0, sizeof(P.reserved));
-	memset(P.salt, 0, sizeof(P.salt));
-	memset(P.personal, 0, sizeof(P.personal));
+	pP->digest_length = (uint8_t)outlen;
+	pP->key_length = 0;
+	pP->fanout = 1;
+	pP->depth = 1;
+	pP->leaf_length = 0;
+	pP->node_offset = 0;
+	pP->node_depth = 0;
+	pP->inner_length = 0;
+	memset(&pP->reserved[0], 0, sizeof(pP->reserved));
+	memset(&pP->salt[0], 0, sizeof(pP->salt));
+	memset(&pP->personal[0], 0, sizeof(pP->personal));
 
-	return blake2b_init_param(S, &P);
+	return blake2b_init_param(S, pP);
 }
 
 
@@ -1588,7 +1960,88 @@ int argon2_thread_create(argon2_thread_handle_t *handle,
 
 void init_block_value(block *b, uint8_t in) { memset(b->v, in, sizeof(b->v)); }
 
+//
+// Derived from libsodium
+// https://github.com/jedisct1/libsodium/blob/master/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-ref.c
+//
 
+void fill_block(const block *prev_block, const block *ref_block, block *next_block)
+{
+	block    blockR, block_tmp;
+	unsigned i;
+
+	copy_block(&blockR, ref_block);
+	xor_block(&blockR, prev_block);
+	copy_block(&block_tmp, &blockR);
+	/* Now blockR = ref_block + prev_block and bloc_tmp = ref_block + prev_block
+	Apply Blake2 on columns of 64-bit words: (0,1,...,15), then
+	(16,17,..31)... finally (112,113,...127) */
+	for (i = 0; i < 8; ++i) {
+		BLAKE2_ROUND_NOMSG(
+			blockR.v[16 * i], blockR.v[16 * i + 1], blockR.v[16 * i + 2],
+			blockR.v[16 * i + 3], blockR.v[16 * i + 4], blockR.v[16 * i + 5],
+			blockR.v[16 * i + 6], blockR.v[16 * i + 7], blockR.v[16 * i + 8],
+			blockR.v[16 * i + 9], blockR.v[16 * i + 10], blockR.v[16 * i + 11],
+			blockR.v[16 * i + 12], blockR.v[16 * i + 13], blockR.v[16 * i + 14],
+			blockR.v[16 * i + 15]);
+	}
+
+	/* Apply Blake2 on rows of 64-bit words: (0,1,16,17,...112,113), then
+	(2,3,18,19,...,114,115).. finally (14,15,30,31,...,126,127) */
+	for (i = 0; i < 8; i++) {
+		BLAKE2_ROUND_NOMSG(
+			blockR.v[2 * i], blockR.v[2 * i + 1], blockR.v[2 * i + 16],
+			blockR.v[2 * i + 17], blockR.v[2 * i + 32], blockR.v[2 * i + 33],
+			blockR.v[2 * i + 48], blockR.v[2 * i + 49], blockR.v[2 * i + 64],
+			blockR.v[2 * i + 65], blockR.v[2 * i + 80], blockR.v[2 * i + 81],
+			blockR.v[2 * i + 96], blockR.v[2 * i + 97], blockR.v[2 * i + 112],
+			blockR.v[2 * i + 113]);
+	}
+
+	copy_block(next_block, &block_tmp);
+	xor_block(next_block, &blockR);
+}
+
+void fill_block_with_xor(const block *prev_block, const block *ref_block,
+	block *next_block)
+{
+	block    blockR, block_tmp;
+	unsigned i;
+
+	copy_block(&blockR, ref_block);
+	xor_block(&blockR, prev_block);
+	copy_block(&block_tmp, &blockR);
+	xor_block(&block_tmp,
+		next_block); /* Saving the next block contents for XOR over */
+					 /* Now blockR = ref_block + prev_block and bloc_tmp = ref_block + prev_block
+					 * + next_block */
+					 /* Apply Blake2 on columns of 64-bit words: (0,1,...,15) , then
+					 (16,17,..31)... finally (112,113,...127) */
+	for (i = 0; i < 8; ++i) {
+		BLAKE2_ROUND_NOMSG(
+			blockR.v[16 * i], blockR.v[16 * i + 1], blockR.v[16 * i + 2],
+			blockR.v[16 * i + 3], blockR.v[16 * i + 4], blockR.v[16 * i + 5],
+			blockR.v[16 * i + 6], blockR.v[16 * i + 7], blockR.v[16 * i + 8],
+			blockR.v[16 * i + 9], blockR.v[16 * i + 10], blockR.v[16 * i + 11],
+			blockR.v[16 * i + 12], blockR.v[16 * i + 13], blockR.v[16 * i + 14],
+			blockR.v[16 * i + 15]);
+	}
+
+	/* Apply Blake2 on rows of 64-bit words: (0,1,16,17,...112,113), then
+	(2,3,18,19,...,114,115).. finally (14,15,30,31,...,126,127) */
+	for (i = 0; i < 8; i++) {
+		BLAKE2_ROUND_NOMSG(
+			blockR.v[2 * i], blockR.v[2 * i + 1], blockR.v[2 * i + 16],
+			blockR.v[2 * i + 17], blockR.v[2 * i + 32], blockR.v[2 * i + 33],
+			blockR.v[2 * i + 48], blockR.v[2 * i + 49], blockR.v[2 * i + 64],
+			blockR.v[2 * i + 65], blockR.v[2 * i + 80], blockR.v[2 * i + 81],
+			blockR.v[2 * i + 96], blockR.v[2 * i + 97], blockR.v[2 * i + 112],
+			blockR.v[2 * i + 113]);
+	}
+
+	copy_block(next_block, &block_tmp);
+	xor_block(next_block, &blockR);
+}
 
 void fill_block(__m128i *state, const block *ref_block, block *next_block,
 	int with_xor) {
@@ -1821,7 +2274,14 @@ void fill_segment(const argon2_instance_t *instance,
 		}
 		else {
 			if (0 == position.pass) {
+				/*printf("=============\n");
+				printf("prev_offset : %d \n", prev_offset);
+				printf("ref_block : %d \n", instance->lane_length * ref_lane + ref_index);
+				printf("curr_block : %d \n", curr_offset);
+				printf("=============\n");*/
 				fill_block(state, ref_block, curr_block, 0);
+				curr_block->ref_block = instance->lane_length * ref_lane + ref_index;
+				curr_block->prev_block = prev_offset;
 			}
 			else {
 				fill_block(state, ref_block, curr_block, 1);
@@ -1851,17 +2311,7 @@ static void *fill_segment_thr(void *thread_data)
 }
 
 
-void xor_block(block *dst, const block *src) {
-	int i;
-	for (i = 0; i < ARGON2_QWORDS_IN_BLOCK; ++i) {
-		dst->v[i] ^= src->v[i];
-	}
-}
 
-
-void copy_block(block *dst, const block *src) {
-	memcpy(dst->v, src->v, sizeof(uint64_t) * ARGON2_QWORDS_IN_BLOCK);
-}
 
 
 static void store_block(void *output, const block *src) {
@@ -1878,8 +2328,24 @@ static const unsigned Mod37BitPosition[] = // map a bit value mod 37 to its posi
 	20, 8, 19, 18
 };
 
-unsigned trailing_zeros(unsigned n) {
-	return Mod37BitPosition[(-n & n) % 37];	
+/*
+unsigned trailing_zeros(uint8_t* n) {
+	return Mod37BitPosition[(-*n & *n) % 37];	
+}*/
+
+unsigned trailing_zeros(char str[64]) {
+	int i, d;
+	d = 0;
+	for (i = 63; i > 0; i--) {
+		if (str[i] == '0') {
+			d++;
+		}
+		else {
+			break;
+		}
+	}
+
+	return d;
 }
 
 int fill_memory_blocks(argon2_instance_t *instance) {
@@ -1922,7 +2388,7 @@ int fill_memory_blocks(argon2_instance_t *instance) {
 					}
 				}
 
-				/* 2.2 Create thread */
+				/* 2.2 Create thread */				
 				position.pass = r;
 				position.lane = l;
 				position.slice = (uint8_t)s;
@@ -1954,70 +2420,272 @@ int fill_memory_blocks(argon2_instance_t *instance) {
 
 		//internal_kat(instance, r); /* Print all memory blocks */
 
-
+		uint8_t nNonce = 0;
 		if (instance != NULL) {
-			while (true) {
-				uint32_t i;
-				std::vector<uint256> leaves;
-				for (i = 0; i < instance->memory_blocks; ++i) {
+			while (true) 
+			{
+				uint8_t blockmem[140];
+				mt_t *mt = mt_create();
+				//uint8_t blockhash_bytes[ARGON2_BLOCK_SIZE];
+				int i;
+
+				for (i = 0; i < instance->memory_blocks/1024; ++i) 
+				{
 					block blockhash;
-					copy_block(&blockhash, &instance->memory[i]);
 					uint8_t blockhash_bytes[ARGON2_BLOCK_SIZE];
-					store_block(blockhash_bytes, &blockhash);
-					uint8_t output[16];
-					blake2b(output, 16, blockhash_bytes, ARGON2_BLOCK_SIZE, NULL, 0);
-					uint256 rv;
-					rv.SetHexUnsigned(output);
-					leaves.push_back(rv);
+					copy_block(&blockhash, &instance->memory[i]);
+					store_block(&blockhash_bytes, &blockhash);
+					mt_add(mt, blockhash_bytes, HASH_LENGTH);
 				}
+				
+				//mt_print(mt);
 
-				uint256 resultMerkelRoot = ComputeMerkleRoot(leaves);
-				std::cout << resultMerkelRoot.GetHex() << std::endl;
-
+				
 				// Step 3 : Select nonce N
-				std::random_device rd;     // only used once to initialise (seed) engine
-				std::mt19937 rng(rd());    // random-number engine used (Mersenne-Twister in this case)
-				std::uniform_int_distribution<int> uni(INT16_MIN, INT16_MAX); // guaranteed unbiased
-
-				auto random_integer = uni(rng);
-				uint64_t nNonce = random_integer;
-				uint8_t blockhash_output[16];
+				nNonce += 1;
+				uint8_t blockhash_output[32];
 				uint8_t blockhash_input[40];
-				uint8_t Y[70][16];
+				uint8_t Y[71][32];
+				uint8_t Y_CLIENT[71][32];
+				memset(&blockhash_output[0], 0, sizeof(blockhash_output));
+				memset(&blockhash_input[0], 0, sizeof(blockhash_input));
+				memset(&Y[0], 0, sizeof(Y));
 
 				// Step 4 : Y0 = H(resultMerkelRoot, N)
-				blake2b(Y[0], 16, &resultMerkelRoot, 32, &nNonce, 8);
+				mt_hash_t resultMerkleRoot;
+				SHA256Context ctx;
+				SHA256Context *pctx = &ctx;
 
+				int ret;
+
+				ret = mt_get_root(mt, resultMerkleRoot);
+				ret = SHA256Reset(pctx);
+				if (shaSuccess != ret)
+				{
+					return ret;
+				}
+				ret = SHA256Input(pctx, resultMerkleRoot, HASH_LENGTH);
+				if (shaSuccess != ret)
+				{
+					return ret;
+				}
+				ret = SHA256Input(pctx, &nNonce, 1);
+				if (shaSuccess != ret)
+				{
+					return ret;
+				}
+				ret = SHA256Result(pctx, (uint8_t*)Y[0]);
+				if (shaSuccess != ret)
+				{
+					return ret;
+				}
 				// Step 5 : For 1 <= j <= L
-				// I(j) = Y(j - 1) mod T;
-				// Y(j) = H(Y(j - 1), X[I(j)])
+				 //I(j) = Y(j - 1) mod T;
+				 //Y(j) = H(Y(j - 1), X[I(j)])
+				
+				if (shaSuccess != ret)
+				{
+					return ret;
+				}
 				uint8_t L = 70;
-				for (uint8_t j = 1; j < L; j++) {
-					uint32_t ij = Y[j - 1] % 2048;
+				block_with_offset blockhash_in_blockchain[140];
+				bool init_blocks = false;
+				for (uint8_t j = 1; j <= L; j++) {
+					uint32_t ij = *Y[j - 1] % 2048;
+
+					if (ij == 0 || ij == 1) {
+						init_blocks = true;
+						break;						
+					}
+					// j = 1, x = 0, 1					
+					// j = 2, x = 2, 3
+					// j = 3, x = 4, 5
+					// j = 4, x = 6, 7
+					// ....
+					// j = 70, x = 138, 139
+					// previous block
+					blockhash_in_blockchain[(j * 2) - 1].offset = instance->memory[ij].prev_block;
+					copy_block(&blockhash_in_blockchain[(j * 2) - 1].memory, &instance->memory[instance->memory[ij].prev_block]);
+					// ref block
+					blockhash_in_blockchain[(j * 2) - 2].offset = instance->memory[ij].ref_block;
+					copy_block(&blockhash_in_blockchain[(j * 2) - 2].memory, &instance->memory[instance->memory[ij].ref_block]);
+					
 					block blockhash;
-					copy_block(&blockhash, instance->memory);
-					blake2b(Y[j], 16, Y[j - 1], 16, &instance->memory[ij], 8);
+					uint8_t blockhash_bytes[ARGON2_BLOCK_SIZE];
+					copy_block(&blockhash, &instance->memory[ij]);					
+					store_block(&blockhash_bytes, &blockhash);					
+					ret = SHA256Reset(pctx);
+					if (shaSuccess != ret)
+					{
+						return ret;
+					}
+					ret = SHA256Input(pctx,(uint8_t*)Y[j-1],HASH_LENGTH);
+					if (shaSuccess != ret)
+					{
+						return ret;
+					}
+					ret = SHA256Input(pctx, blockhash_bytes, HASH_LENGTH);
+					if (shaSuccess != ret)
+					{
+						return ret;
+					}
+					ret = SHA256Result(pctx, (uint8_t*)Y[j]);
+					if (shaSuccess != ret)
+					{
+						return ret;
+					}
+				}
+
+				if (init_blocks) {
+					continue;
+				}
+
+				uint8_t d = 1; // ลองกำหนด d = 1 
+
+				char hex_tmp[64];
+				int n;
+				for (n = 0; n < 32; n++) {
+					sprintf(&hex_tmp[n * 2], "%02x", Y[L][n]);
 				}
 
 				// Step 6 : If Y(L) had d trailing zeros, then (resultMerkelroot, N, Y(L))
-				uint8_t d = 5;
-				if (trailing_zeros(Y[L]) == d) {
-					// Step 7 : Y(0) = H(resultMerkelRoot, N)
-					blake2b(Y[0], 16, &resultMerkelRoot, 32, &nNonce, 8);
-					// Step 8 : Verify all block (70 blocks) with resultMerkelRoot
+				//uint8_t d = trailing_zeros(Y[L - 1]);
 
-					// Step 9 : Compute Y(L) from
-					// X[I(j)] = F(
-					// Y(j) = H(Y(j - 1), X[I(j)])
-					// Step 10 : Check Y(L) had d tralling zeros then agree
-					if (trailing_zeros(Y[L]) == d)
-					{
-						return true;
-					}
-				}
-				else {
+				if (trailing_zeros(hex_tmp) != d) {
 					continue;
 				}
+				else {
+
+					int t;					
+					for (t = 0; t < 71; t++) {
+						printf("Y[%d] = 0x", t);
+						for (n = 0; n < 32; n++) {
+							printf("%02x", Y[t][n]);
+						}
+						printf("\n");
+					}		
+
+					// Step 7 : Y_CLIENT(0) = H(resultMerkelRoot, N)
+					mt_hash_t resultMerkleRootClient_y0;
+					SHA256Context ctx_client_y0;
+					SHA256Context *pctx_client_y0 = &ctx_client_y0;
+
+					int ret;
+
+					ret = mt_get_root(mt, resultMerkleRootClient_y0);
+					ret = SHA256Reset(pctx_client_y0);
+					if (shaSuccess != ret)
+					{
+						return ret;
+					}
+					ret = SHA256Input(pctx_client_y0, resultMerkleRootClient_y0, HASH_LENGTH);
+					if (shaSuccess != ret)
+					{
+						return ret;
+					}
+					ret = SHA256Input(pctx_client_y0, &nNonce, 1);
+					if (shaSuccess != ret)
+					{
+						return ret;
+					}
+					ret = SHA256Result(pctx_client_y0, (uint8_t*)Y_CLIENT[0]);
+					if (shaSuccess != ret)
+					{
+						return ret;
+					}
+
+					
+					printf("Y_CLIENT[0] = 0x");
+					for (n = 0; n < 32; n++) {
+						printf("%02x", Y_CLIENT[0][n]);
+					}
+					printf("\n");
+					// เมิงส่งเป็น array ให้กรูหน่อย เพราะตัวนี้มันต้องส่งลง blockchain ซึ่งคนที่ตรวจสอบจะไม่มีข้อมูลในเมมโมรี่ เหมือนคนขุด 
+					// Step 8 : Verify all block
+					for (i = 0; i < 140; ++i)
+					{
+						block blockhash;
+						copy_block(&blockhash, &blockhash_in_blockchain[i].memory);
+						uint8_t blockhash_bytes[ARGON2_BLOCK_SIZE];
+						store_block(&blockhash_bytes, &blockhash);
+						//uint8_t output[16];
+						//	blake2b(output, 16, blockhash_bytes, ARGON2_BLOCK_SIZE, NULL, 0);
+						//	uint256 rv;
+						//	rv.SetHexUnsigned(output);
+						//	leaves.push_back(rv);
+						//}
+						//memset(&blockmem[0], 0, sizeof(blockmem));
+						//mt_t *mt = mt_create(); 
+						//for (uint32_t i = 0; i < 140; ++i) {
+						if (mt_verify(mt, blockhash_bytes, HASH_LENGTH, blockhash_in_blockchain[i].offset) == MT_ERR_ROOT_MISMATCH) {
+							printf("Root mismatch error!\n");
+							return MT_ERR_ROOT_MISMATCH;
+						}
+						//mt_print(mt);
+					}
+
+					// Step 9 : Compute Y(L) from
+					// X[I(j)] = F(X[i(j)-1], X[i(j)-2])
+					// Y(j) = H(Y(j - 1), X[I(j)])
+					for (uint8_t j = 1; j <= L; j++) {
+
+						block X_IJ;
+						__m128i state_test[64];
+						memcpy(state_test, &blockhash_in_blockchain[(j * 2) - 1].memory.v, ARGON2_BLOCK_SIZE);
+						fill_block(state_test, &blockhash_in_blockchain[(j * 2) - 2].memory, &X_IJ, 0);
+
+
+						//Y(j) = H(Y(j - 1), X[I(j)])
+						block blockhash_client_tmp;
+						uint8_t blockhash_bytes_client_tmp[ARGON2_BLOCK_SIZE];
+						copy_block(&blockhash_client_tmp, &X_IJ);
+						store_block(&blockhash_bytes_client_tmp, &blockhash_client_tmp);
+						SHA256Context ctx_client_yl;
+						SHA256Context *pctx_client_yl = &ctx_client_yl;
+
+						ret = SHA256Reset(pctx_client_yl);
+						if (shaSuccess != ret)
+						{
+							return ret;
+						}
+						ret = SHA256Input(pctx_client_yl, (uint8_t*)Y_CLIENT[j - 1], HASH_LENGTH);
+						if (shaSuccess != ret)
+						{
+							return ret;
+						}
+						ret = SHA256Input(pctx_client_yl, blockhash_bytes_client_tmp, HASH_LENGTH);
+						if (shaSuccess != ret)
+						{
+							return ret;
+						}
+						ret = SHA256Result(pctx_client_yl, (uint8_t*)Y_CLIENT[j]);
+						if (shaSuccess != ret)
+						{
+							return ret;
+						}
+					}
+
+					// Step 10 : Check Y(L) had d tralling zeros then agree
+					//if (trailing_zeros(Y[L]) == d)
+					//{
+					//	return true;
+					//}
+
+					for (t = 0; t < 71; t++) {
+						char hex_tmp_client[64];
+						int n_client;
+						printf("Y_CLIENT[%d] = 0x", t);
+						for (n_client = 0; n_client < 32; n_client++) {
+							printf("%02x", Y_CLIENT[t][n_client]);
+						}
+						printf("\n");
+					}
+					
+					
+				}
+
+				
+				
 			}
 		}
 	}
@@ -2146,6 +2814,7 @@ static void generate_testvectors(argon2_type type, const uint32_t version) {
 #define TEST_SECRETLEN 8
 #define TEST_ADLEN 12
 	argon2_context context;
+	argon2_context *pContext = &context;
 
 	unsigned char out[TEST_OUTLEN];
 	unsigned char pwd[TEST_PWDLEN];
@@ -2158,11 +2827,14 @@ static void generate_testvectors(argon2_type type, const uint32_t version) {
 	unsigned t_cost = 1;
 	unsigned m_cost = 2097152;	
 	unsigned lanes = 4;
-
-	memset(pwd, 1, TEST_OUTLEN);
-	memset(salt, 2, TEST_SALTLEN);
-	memset(secret, 3, TEST_SECRETLEN);
-	memset(ad, 4, TEST_ADLEN);
+	
+	
+	memset(pContext,0,sizeof(argon2_context));
+	memset(&out[0], 0, sizeof(out));
+	memset(&pwd[0], 1, TEST_OUTLEN);
+	memset(&salt[0], 2, TEST_SALTLEN);
+	memset(&secret[0], 3, TEST_SECRETLEN);
+	memset(&ad[0], 4, TEST_ADLEN);
 
 	context.out = out;
 	context.outlen = TEST_OUTLEN;
@@ -2221,5 +2893,4 @@ int main(int argc, char *argv[]) {
 	}
 
 	generate_testvectors(type, version);
-	return ARGON2_OK;
 }

@@ -42,6 +42,21 @@
     <ClCompile Include="merkle.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="mt_arr_list.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="mt_crypto.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="mt_impl.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="mt_test.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="sha224-256.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="argon2.h">
@@ -97,6 +112,24 @@
     </ClInclude>
     <ClInclude Include="block.h">
       <Filter>Resource Files</Filter>
+    </ClInclude>
+    <ClInclude Include="merkletree.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="mt_arr_list.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="mt_config.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="mt_crypto.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="mt_err.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sha.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
