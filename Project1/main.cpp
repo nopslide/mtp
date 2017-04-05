@@ -2419,14 +2419,13 @@ int fill_memory_blocks(argon2_instance_t *instance) {
 
 
 		//internal_kat(instance, r); /* Print all memory blocks */
-
+		// Step 1 : Compute F(I) and store its T blocks X[1], X[2], ..., X[T] in the memory
 		uint8_t nNonce = 0;
 		if (instance != NULL) {
 			while (true) 
 			{
-				uint8_t blockmem[140];
+				// Step 2 : Compute the root Φ of the Merkle hash tree
 				mt_t *mt = mt_create();
-				//uint8_t blockhash_bytes[ARGON2_BLOCK_SIZE];
 				int i;
 
 				for (i = 0; i < instance->memory_blocks/1024; ++i) 
@@ -2437,19 +2436,13 @@ int fill_memory_blocks(argon2_instance_t *instance) {
 					store_block(&blockhash_bytes, &blockhash);
 					mt_add(mt, blockhash_bytes, HASH_LENGTH);
 				}
-				
-				//mt_print(mt);
-
-				
+								
 				// Step 3 : Select nonce N
 				nNonce += 1;
-				uint8_t blockhash_output[32];
-				uint8_t blockhash_input[40];
 				uint8_t Y[71][32];
 				uint8_t Y_CLIENT[71][32];
-				memset(&blockhash_output[0], 0, sizeof(blockhash_output));
-				memset(&blockhash_input[0], 0, sizeof(blockhash_input));
 				memset(&Y[0], 0, sizeof(Y));
+				memset(&Y_CLIENT[0], 0, sizeof(Y_CLIENT));
 
 				// Step 4 : Y0 = H(resultMerkelRoot, N)
 				mt_hash_t resultMerkleRoot;
@@ -2481,15 +2474,12 @@ int fill_memory_blocks(argon2_instance_t *instance) {
 				}
 				// Step 5 : For 1 <= j <= L
 				 //I(j) = Y(j - 1) mod T;
-				 //Y(j) = H(Y(j - 1), X[I(j)])
+				 //Y(j) = H(Y(j - 1), X[I(j)])				
 				
-				if (shaSuccess != ret)
-				{
-					return ret;
-				}
 				uint8_t L = 70;
 				block_with_offset blockhash_in_blockchain[140];
 				bool init_blocks = false;
+				bool unmatch_block = false;
 				for (uint8_t j = 1; j <= L; j++) {
 					uint32_t ij = *Y[j - 1] % 2048;
 
@@ -2506,13 +2496,35 @@ int fill_memory_blocks(argon2_instance_t *instance) {
 					// previous block
 					blockhash_in_blockchain[(j * 2) - 1].offset = instance->memory[ij].prev_block;
 					copy_block(&blockhash_in_blockchain[(j * 2) - 1].memory, &instance->memory[instance->memory[ij].prev_block]);
+					blockhash_in_blockchain[(j * 2) - 1].memory.prev_block = instance->memory[instance->memory[ij].prev_block].prev_block;
+					blockhash_in_blockchain[(j * 2) - 1].memory.ref_block = instance->memory[instance->memory[ij].prev_block].ref_block;
 					// ref block
 					blockhash_in_blockchain[(j * 2) - 2].offset = instance->memory[ij].ref_block;
 					copy_block(&blockhash_in_blockchain[(j * 2) - 2].memory, &instance->memory[instance->memory[ij].ref_block]);
+					blockhash_in_blockchain[(j * 2) - 2].memory.prev_block = instance->memory[instance->memory[ij].ref_block].prev_block;
+					blockhash_in_blockchain[(j * 2) - 2].memory.ref_block = instance->memory[instance->memory[ij].ref_block].ref_block;
+
+					block X_IJ;
+					__m128i state_test[64];
+					memset(state_test, 0, sizeof(state_test));
+					memcpy(state_test, &blockhash_in_blockchain[(j * 2) - 1].memory.v, ARGON2_BLOCK_SIZE);
+					fill_block(state_test, &blockhash_in_blockchain[(j * 2) - 2].memory, &X_IJ, 0);
+					X_IJ.prev_block = instance->memory[ij].prev_block;
+					X_IJ.ref_block = instance->memory[ij].ref_block;
 					
 					block blockhash;
 					uint8_t blockhash_bytes[ARGON2_BLOCK_SIZE];
-					copy_block(&blockhash, &instance->memory[ij]);					
+					copy_block(&blockhash, &instance->memory[ij]);	
+
+					int countIndex;
+					for (countIndex = 0; countIndex < 128; countIndex++) {
+						if (X_IJ.v[countIndex] != instance->memory[ij].v[countIndex]) {
+							unmatch_block = true;
+							break;
+						}
+					}
+					
+
 					store_block(&blockhash_bytes, &blockhash);					
 					ret = SHA256Reset(pctx);
 					if (shaSuccess != ret)
@@ -2540,6 +2552,10 @@ int fill_memory_blocks(argon2_instance_t *instance) {
 					continue;
 				}
 
+				if (unmatch_block) {
+					continue;
+				}
+
 				uint8_t d = 1; // ลองกำหนด d = 1 
 
 				char hex_tmp[64];
@@ -2549,8 +2565,6 @@ int fill_memory_blocks(argon2_instance_t *instance) {
 				}
 
 				// Step 6 : If Y(L) had d trailing zeros, then (resultMerkelroot, N, Y(L))
-				//uint8_t d = trailing_zeros(Y[L - 1]);
-
 				if (trailing_zeros(hex_tmp) != d) {
 					continue;
 				}
@@ -2558,6 +2572,7 @@ int fill_memory_blocks(argon2_instance_t *instance) {
 
 					int t;					
 					for (t = 0; t < 71; t++) {
+						if (t >= 1 && t < 70) continue;
 						printf("Y[%d] = 0x", t);
 						for (n = 0; n < 32; n++) {
 							printf("%02x", Y[t][n]);
@@ -2566,29 +2581,29 @@ int fill_memory_blocks(argon2_instance_t *instance) {
 					}		
 
 					// Step 7 : Y_CLIENT(0) = H(resultMerkelRoot, N)
-					mt_hash_t resultMerkleRootClient_y0;
-					SHA256Context ctx_client_y0;
-					SHA256Context *pctx_client_y0 = &ctx_client_y0;
+					mt_hash_t resultMerkleRootClient;
+					SHA256Context ctx_client;
+					SHA256Context *pctx_client = &ctx_client;
 
 					int ret;
 
-					ret = mt_get_root(mt, resultMerkleRootClient_y0);
-					ret = SHA256Reset(pctx_client_y0);
+					ret = mt_get_root(mt, resultMerkleRootClient);
+					ret = SHA256Reset(pctx_client);
 					if (shaSuccess != ret)
 					{
 						return ret;
 					}
-					ret = SHA256Input(pctx_client_y0, resultMerkleRootClient_y0, HASH_LENGTH);
+					ret = SHA256Input(pctx_client, resultMerkleRootClient, HASH_LENGTH);
 					if (shaSuccess != ret)
 					{
 						return ret;
 					}
-					ret = SHA256Input(pctx_client_y0, &nNonce, 1);
+					ret = SHA256Input(pctx_client, &nNonce, 1);
 					if (shaSuccess != ret)
 					{
 						return ret;
 					}
-					ret = SHA256Result(pctx_client_y0, (uint8_t*)Y_CLIENT[0]);
+					ret = SHA256Result(pctx_client, (uint8_t*)Y_CLIENT[0]);
 					if (shaSuccess != ret)
 					{
 						return ret;
@@ -2600,7 +2615,7 @@ int fill_memory_blocks(argon2_instance_t *instance) {
 						printf("%02x", Y_CLIENT[0][n]);
 					}
 					printf("\n");
-					// เมิงส่งเป็น array ให้กรูหน่อย เพราะตัวนี้มันต้องส่งลง blockchain ซึ่งคนที่ตรวจสอบจะไม่มีข้อมูลในเมมโมรี่ เหมือนคนขุด 
+
 					// Step 8 : Verify all block
 					for (i = 0; i < 140; ++i)
 					{
@@ -2608,32 +2623,20 @@ int fill_memory_blocks(argon2_instance_t *instance) {
 						copy_block(&blockhash, &blockhash_in_blockchain[i].memory);
 						uint8_t blockhash_bytes[ARGON2_BLOCK_SIZE];
 						store_block(&blockhash_bytes, &blockhash);
-						//uint8_t output[16];
-						//	blake2b(output, 16, blockhash_bytes, ARGON2_BLOCK_SIZE, NULL, 0);
-						//	uint256 rv;
-						//	rv.SetHexUnsigned(output);
-						//	leaves.push_back(rv);
-						//}
-						//memset(&blockmem[0], 0, sizeof(blockmem));
-						//mt_t *mt = mt_create(); 
-						//for (uint32_t i = 0; i < 140; ++i) {
 						if (mt_verify(mt, blockhash_bytes, HASH_LENGTH, blockhash_in_blockchain[i].offset) == MT_ERR_ROOT_MISMATCH) {
 							printf("Root mismatch error!\n");
 							return MT_ERR_ROOT_MISMATCH;
 						}
-						//mt_print(mt);
 					}
 
 					// Step 9 : Compute Y(L) from
-					// X[I(j)] = F(X[i(j)-1], X[i(j)-2])
-					// Y(j) = H(Y(j - 1), X[I(j)])
 					for (uint8_t j = 1; j <= L; j++) {
 
+						// X[I(j)] = F(X[i(j)-1], X[i(j)-2])
 						block X_IJ;
 						__m128i state_test[64];
 						memcpy(state_test, &blockhash_in_blockchain[(j * 2) - 1].memory.v, ARGON2_BLOCK_SIZE);
 						fill_block(state_test, &blockhash_in_blockchain[(j * 2) - 2].memory, &X_IJ, 0);
-
 
 						//Y(j) = H(Y(j - 1), X[I(j)])
 						block blockhash_client_tmp;
@@ -2672,6 +2675,7 @@ int fill_memory_blocks(argon2_instance_t *instance) {
 					//}
 
 					for (t = 0; t < 71; t++) {
+						if (t < 70) continue;
 						char hex_tmp_client[64];
 						int n_client;
 						printf("Y_CLIENT[%d] = 0x", t);
