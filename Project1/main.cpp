@@ -2434,7 +2434,28 @@ int fill_memory_blocks(argon2_instance_t *instance) {
 					uint8_t blockhash_bytes[ARGON2_BLOCK_SIZE];
 					copy_block(&blockhash, &instance->memory[i]);
 					store_block(&blockhash_bytes, &blockhash);
-					mt_add(mt, blockhash_bytes, HASH_LENGTH);
+					// hash each block with sha256
+					SHA256Context ctx;
+					SHA256Context *pctx = &ctx;
+					uint8_t hashBlock[32];
+					int ret;
+					ret = SHA256Reset(pctx);
+					if (shaSuccess != ret)
+					{
+						return ret;
+					}
+					ret = SHA256Input(pctx, blockhash_bytes, ARGON2_BLOCK_SIZE);
+					if (shaSuccess != ret)
+					{
+						return ret;
+					}
+					ret = SHA256Result(pctx, (uint8_t*)hashBlock);
+					if (shaSuccess != ret)
+					{
+						return ret;
+					}
+					// add element to merkel tree
+					mt_add(mt, hashBlock, HASH_LENGTH);
 				}
 								
 				// Step 3 : Select nonce N
@@ -2536,7 +2557,7 @@ int fill_memory_blocks(argon2_instance_t *instance) {
 					{
 						return ret;
 					}
-					ret = SHA256Input(pctx, blockhash_bytes, HASH_LENGTH);
+					ret = SHA256Input(pctx, blockhash_bytes, ARGON2_BLOCK_SIZE);
 					if (shaSuccess != ret)
 					{
 						return ret;
@@ -2623,7 +2644,27 @@ int fill_memory_blocks(argon2_instance_t *instance) {
 						copy_block(&blockhash, &blockhash_in_blockchain[i].memory);
 						uint8_t blockhash_bytes[ARGON2_BLOCK_SIZE];
 						store_block(&blockhash_bytes, &blockhash);
-						if (mt_verify(mt, blockhash_bytes, HASH_LENGTH, blockhash_in_blockchain[i].offset) == MT_ERR_ROOT_MISMATCH) {
+						// hash each block with sha256
+						SHA256Context ctx;
+						SHA256Context *pctx = &ctx;
+						uint8_t hashBlock[32];
+						int ret;
+						ret = SHA256Reset(pctx);
+						if (shaSuccess != ret)
+						{
+							return ret;
+						}
+						ret = SHA256Input(pctx, blockhash_bytes, ARGON2_BLOCK_SIZE);
+						if (shaSuccess != ret)
+						{
+							return ret;
+						}
+						ret = SHA256Result(pctx, (uint8_t*)hashBlock);
+						if (shaSuccess != ret)
+						{
+							return ret;
+						}
+						if (mt_verify(mt, hashBlock, HASH_LENGTH, blockhash_in_blockchain[i].offset) == MT_ERR_ROOT_MISMATCH) {
 							printf("Root mismatch error!\n");
 							return MT_ERR_ROOT_MISMATCH;
 						}
@@ -2656,7 +2697,7 @@ int fill_memory_blocks(argon2_instance_t *instance) {
 						{
 							return ret;
 						}
-						ret = SHA256Input(pctx_client_yl, blockhash_bytes_client_tmp, HASH_LENGTH);
+						ret = SHA256Input(pctx_client_yl, blockhash_bytes_client_tmp, ARGON2_BLOCK_SIZE);
 						if (shaSuccess != ret)
 						{
 							return ret;
